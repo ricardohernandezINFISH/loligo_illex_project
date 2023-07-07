@@ -1,0 +1,125 @@
+## State Area Bottom Temperature Data
+
+library(tidyverse)
+library(ncdf4)
+
+## read (.nc) file
+  
+  
+nc_data <- nc_open("C:/Users/Ricardo.Hernandez/Documents/illex_loligo_project/data/cmems_mod_glo_phy_anfc_0.083deg_P1D-m_1688659292772.nc")
+
+print(nc_data)
+
+## attribute functions allows us to identify and call the correct variables and 
+## dimensions for extractions. This is important to separate the lat,long and seperate by time.
+attributes(nc_data$var)
+attributes(nc_data$dim)  
+
+## extracting the variables to their variables using 'ncvar_get'
+
+lat <- ncvar_get(nc_data, "latitude")
+head(lat)
+nlat <- dim(lat) ## double checks that it matches the metadata: 109
+
+long <- ncvar_get(nc_data, "longitude")
+nlong <- dim(long) ## double checks that it matches the metadata: 145
+
+print(c(nlong,nlat)) ## triple checking
+
+time <- ncvar_get(nc_data, "time")
+head(time)
+nt <- dim(time)
+
+str(time)
+tunits <- ncatt_get(nc_data, "time", "units")#check units
+print(tunits)
+
+
+## will be using ncvar_get to extract variables and ncatt_get to retrieve the attributes
+## in "matrix slices"
+bt_array <- ncvar_get(nc_data,"tob")
+
+fillvalue <- ncatt_get(nc_data, "tob", "_FillValue")
+
+dim(bt_array)
+
+# replacing nc Fill Values with NAs since they just indicate how missing values are represented
+
+bt_array[bt_array==fillvalue$value] <- NA
+bt_array
+dim(bt_array)
+###Human-readable time
+time_obs <- as.POSIXct(time *3600,format = "%Y-%m-%d %H:%M:%OS", origin = "1950-01-01 00:00:00", tz = "GMT" )
+##multiple the 3600 because my date format is converting my "hours"
+## to seconds
+# the code above is printing th time incorrectly and not calculating hours since 1980
+dim(time_obs)
+print(tunits)
+print(time)
+print(time_obs)
+range(time_obs)
+
+## We can look at the arrays in slices to see different lat longs in a given time. 
+## Temperature is still not apperaing but it should be visible further down
+## In R, the array is objects that can hold two or more than two-dimensional data
+
+print(bt_array)
+bt_slice <- bt_array [, , 1]
+print(bt_slice)
+image(long, lat, bt_slice)
+
+### Creating  a data frame of the array into a whole matrix
+
+##create a 2-D matrix of long, lat, and time
+lonlattime <- as.matrix(expand.grid(long,lat,time_obs))
+
+## reshape whole array
+bt_vec_long <- as.vector(bt_array)
+length(bt_vec_long)
+
+#Create the data frame
+bt_obs <- data.frame(cbind(lonlattime, bt_vec_long))
+
+#creating proper column names ot the data frame
+colnames(bt_obs) <- c("long", "lat", "date", "bt_c")
+
+#removing ALL NA values, regardless if they carry temperature data.
+# I can calculate the mean_temp values at a later date for any areas that are missing
+#temperature
+
+bt_final <- na.omit(bt_obs)
+
+dim(bt_obs) #checking if values changed
+dim(bt_final)
+
+bt_data <- bt_final[-c(1:2)] ## removed long, lat to generate time series
+
+bt_data$date <- as.Date(bt_data$date)
+bt_data$bt_c <- as.double(bt_data$bt_c)
+
+bt_data <-  bt_data %>%
+  group_by(date) %>% 
+  summarize(mean_c= mean(bt_data$bt_c))
+
+str(bt_data)
+
+write.csv(bt_data,"C:/Users/Ricardo.Hernandez/Documents/illex_loligo_project/data/2304010706bottom_temp.csv")
+
+p <- ggplot(bt_data, aes(x= date, y= bt_c)) +
+  geom_point()
+p
+
+### attempting to generate atlas with temperature
+# looking at infish r notes
+library(leaflet)
+library(raster)
+mymap <- leaflet()  %>% 
+  addProviderTiles("Esri.OceanBasemap",group="Base")
+
+mymap
+
+# another way
+dim(bt_slice)
+r <- raster(time(bt_slice), xmn=min(long), xmx=max(long), ymn=min(lat), ymx=max(lat), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+ 
+r_brick <- brick(bt_array, xmn=min(lat), xmx=max(lat), ymn=min(long), ymx=max(long), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
